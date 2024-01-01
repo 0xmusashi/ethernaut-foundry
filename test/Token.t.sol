@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.6.0;
+pragma solidity ^0.7.0;
+pragma abicoder v2;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {Token} from "../src/Token.sol";
@@ -18,7 +19,7 @@ contract TokenTest is Test {
     function test_overflow() public {
         vm.startPrank(attacker);
 
-        // token.transfer(randomUser, 21);
+        token.transfer(randomUser, 21);
         assertGe(token.balanceOf(attacker), 20);
 
         vm.stopPrank();
