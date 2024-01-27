@@ -1,0 +1,331 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity 0.8.13;
+
+import "operator-filter-registry/src/DefaultOperatorFilterer.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/token/common/ERC2981.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+
+import "./interfaces/IEtherealSpheres.sol";
+
+contract EtherealSpheres is
+    IEtherealSpheres,
+    DefaultOperatorFilterer,
+    ERC721Enumerable,
+    ERC2981,
+    Ownable
+{
+    using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.AddressSet;
+
+    uint256 public constant MAXIMUM_SUPPLY = 4500;
+    uint256 public constant PRIVATE_PERIOD_SUPPLY = 2800;
+    uint256 public constant RESERVE_LIMIT = 800;
+    uint256 public constant MINT_ENABLING_TIMESTAMP = 1703559600;
+    uint256 public constant PRIVATE_PERIOD_PRICE = 40_000_000;
+    uint256 public constant OG_PERIOD_PRICE = 50_000_000;
+    uint256 public constant WHITELIST_PERIOD_PRICE = 60_000_000;
+    uint256 public constant PUBLIC_PERIOD_PRICE = 75_000_000;
+    uint256 public constant OG_PERIOD_LIMIT = 3;
+    uint256 public constant WHITELIST_PERIOD_LIMIT = 2;
+    uint96 public constant ROYALTY_PERCENTAGE = 300;
+    IERC20 public constant USDT =
+        IERC20(0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9);
+    IERC20 public constant USDC =
+        IERC20(0xaf88d065e77c8cC2239327C5EDb3A432268e5831);
+    IERC721 public constant BABY_SPHERES =
+        IERC721(0x24597F49Bc36abb108Cb869CBfed34Db26030E62);
+    address public constant TREASURY =
+        0xF528fe9DadEC143C35A83e4DBBc2f7C11C886A68;
+
+    uint256 public reserved;
+    uint256 private _nextTokenId = 1;
+    string public baseURI;
+    SaleStatus public saleStatus;
+    IOriginalMintersPool public originalMintersPool;
+
+    mapping(address => bool) public isPrivatePeriodAccount;
+    mapping(address => bool) public isOgPeriodAccount;
+    mapping(address => bool) public isWhitelistPeriodAccount;
+    mapping(address => uint256)
+        public numberOfMintedTokensDuringOgPeriodByAccount;
+    mapping(address => uint256)
+        public numberOfMintedTokensDuringWhitelistPeriodByAccount;
+    EnumerableSet.AddressSet private _originalMinters;
+
+    /// @param royaltyDistributor_ RoyaltyDistributor contract address.
+    /// @param baseURI_ Base URI.
+    constructor(
+        address royaltyDistributor_,
+        string memory baseURI_
+    ) ERC721("Ethereal Spheres", "hraNFT") {
+        baseURI = baseURI_;
+        _setDefaultRoyalty(royaltyDistributor_, ROYALTY_PERCENTAGE);
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function reserve(
+        address account_,
+        uint256 numberOfTokens_
+    ) external onlyOwner {
+        if (reserved + numberOfTokens_ > RESERVE_LIMIT) {
+            revert ReserveLimitExceeded();
+        }
+        uint256 m_nextTokenId = _nextTokenId;
+        for (uint256 i = 0; i < numberOfTokens_; ) {
+            _safeMint(account_, m_nextTokenId);
+            unchecked {
+                m_nextTokenId++;
+                i++;
+            }
+        }
+        _nextTokenId = m_nextTokenId;
+        unchecked {
+            reserved += numberOfTokens_;
+        }
+        if (!_originalMinters.contains(account_)) {
+            _originalMinters.add(account_);
+        }
+        originalMintersPool.updateStakeFor(account_, numberOfTokens_);
+        emit Reserved(numberOfTokens_);
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function updateSaleStatus(SaleStatus saleStatus_) external onlyOwner {
+        saleStatus = saleStatus_;
+        emit SaleStatusUpdated(saleStatus_);
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function addPrivatePeriodAccounts(
+        address[] calldata accounts_
+    ) external onlyOwner {
+        for (uint256 i = 0; i < accounts_.length; ) {
+            isPrivatePeriodAccount[accounts_[i]] = true;
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function removePrivatePeriodAccounts(
+        address[] calldata accounts_
+    ) external onlyOwner {
+        for (uint256 i = 0; i < accounts_.length; ) {
+            delete isPrivatePeriodAccount[accounts_[i]];
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function addOgPeriodAccounts(
+        address[] calldata accounts_
+    ) external onlyOwner {
+        for (uint256 i = 0; i < accounts_.length; ) {
+            isOgPeriodAccount[accounts_[i]] = true;
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function removeOgPeriodAccounts(
+        address[] calldata accounts_
+    ) external onlyOwner {
+        for (uint256 i = 0; i < accounts_.length; ) {
+            delete isOgPeriodAccount[accounts_[i]];
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function addWhitelistPeriodAccounts(
+        address[] calldata accounts_
+    ) external onlyOwner {
+        for (uint256 i = 0; i < accounts_.length; ) {
+            isWhitelistPeriodAccount[accounts_[i]] = true;
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function removeWhitelistPeriodAccounts(
+        address[] calldata accounts_
+    ) external onlyOwner {
+        for (uint256 i = 0; i < accounts_.length; ) {
+            delete isWhitelistPeriodAccount[accounts_[i]];
+            unchecked {
+                i++;
+            }
+        }
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function updateOriginalMintersPool(
+        IOriginalMintersPool originalMintersPool_
+    ) external onlyOwner {
+        emit OriginalMintersPoolUpdated(
+            originalMintersPool,
+            originalMintersPool_
+        );
+        originalMintersPool = originalMintersPool_;
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function updateBaseURI(string calldata baseURI_) external onlyOwner {
+        emit BaseURIUpdated(baseURI, baseURI_);
+        baseURI = baseURI_;
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function mint(
+        uint256 numberOfTokens_,
+        PaymentToken paymentToken_
+    ) external {
+        if (saleStatus != SaleStatus.OPEN) {
+            revert SaleClosed();
+        }
+        if (numberOfTokens_ == 0) {
+            revert ZeroEntry();
+        }
+        uint256 m_totalSupply = totalSupply();
+        if (m_totalSupply + numberOfTokens_ > MAXIMUM_SUPPLY) {
+            revert MaximumSupplyExceeded();
+        }
+        uint256 difference = block.timestamp - MINT_ENABLING_TIMESTAMP;
+        uint256 price;
+        if (difference <= 59 hours) {
+            if (!isPrivatePeriodAccount[msg.sender]) {
+                revert ForbiddenToMintTokens();
+            }
+            if (m_totalSupply + numberOfTokens_ > PRIVATE_PERIOD_SUPPLY) {
+                revert PrivatePeriodSupplyExceeded();
+            }
+            price = PRIVATE_PERIOD_PRICE * numberOfTokens_;
+        } else if (difference > 59 hours && difference <= 60 hours) {
+            uint256 balance = BABY_SPHERES.balanceOf(msg.sender);
+            if (
+                isOgPeriodAccount[msg.sender] ||
+                isPrivatePeriodAccount[msg.sender] ||
+                balance > 0
+            ) {
+                uint256 limit;
+                if (balance > 1) {
+                    limit = OG_PERIOD_LIMIT * balance;
+                } else {
+                    limit = OG_PERIOD_LIMIT;
+                }
+                if (
+                    numberOfMintedTokensDuringOgPeriodByAccount[msg.sender] +
+                        numberOfTokens_ >
+                    limit
+                ) {
+                    revert LimitExceeded();
+                }
+                numberOfMintedTokensDuringOgPeriodByAccount[
+                    msg.sender
+                ] += numberOfTokens_;
+                price = OG_PERIOD_PRICE * numberOfTokens_;
+            } else {
+                revert ForbiddenToMintTokens();
+            }
+        } else if (difference > 60 hours && difference <= 61 hours) {
+            if (
+                isWhitelistPeriodAccount[msg.sender] ||
+                isOgPeriodAccount[msg.sender] ||
+                isPrivatePeriodAccount[msg.sender]
+            ) {
+                if (
+                    numberOfMintedTokensDuringWhitelistPeriodByAccount[
+                        msg.sender
+                    ] +
+                        numberOfTokens_ >
+                    WHITELIST_PERIOD_LIMIT
+                ) {
+                    revert LimitExceeded();
+                }
+                numberOfMintedTokensDuringWhitelistPeriodByAccount[
+                    msg.sender
+                ] += numberOfTokens_;
+                price = WHITELIST_PERIOD_PRICE * numberOfTokens_;
+            } else {
+                revert ForbiddenToMintTokens();
+            }
+        } else {
+            price = PUBLIC_PERIOD_PRICE * numberOfTokens_;
+        }
+        if (paymentToken_ == PaymentToken.USDT) {
+            USDT.safeTransferFrom(msg.sender, TREASURY, price);
+        } else {
+            USDC.safeTransferFrom(msg.sender, TREASURY, price);
+        }
+        uint256 m_nextTokenId = _nextTokenId;
+        for (uint256 i = 0; i < numberOfTokens_; ) {
+            _safeMint(msg.sender, m_nextTokenId);
+            unchecked {
+                m_nextTokenId++;
+                i++;
+            }
+        }
+        _nextTokenId = m_nextTokenId;
+        if (!_originalMinters.contains(msg.sender)) {
+            _originalMinters.add(msg.sender);
+        }
+        originalMintersPool.updateStakeFor(msg.sender, numberOfTokens_);
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function isOriginalMinter(address account_) external view returns (bool) {
+        return _originalMinters.contains(account_);
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function originalMintersLength() external view returns (uint256) {
+        return _originalMinters.length();
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function originalMinterAt(uint256 index_) external view returns (address) {
+        return _originalMinters.at(index_);
+    }
+
+    /// @inheritdoc IEtherealSpheres
+    function ogPeriodLimitByAccount(
+        address account_
+    ) external view returns (uint256 limit_) {
+        uint256 balance = BABY_SPHERES.balanceOf(account_);
+        if (
+            isOgPeriodAccount[account_] ||
+            isPrivatePeriodAccount[account_] ||
+            balance > 0
+        ) {
+            if (balance > 1) {
+                limit_ = OG_PERIOD_LIMIT * balance;
+            } else {
+                limit_ = OG_PERIOD_LIMIT;
+            }
+        }
+    }
+
+    /// @inheritdoc IERC165
+    function supportsInterface(
+        bytes4 interfaceId_
+    ) public view override(ERC721Enumerable, ERC2981) returns (bool) {
+        return super.supportsInterface(interfaceId_);
+    }
+
+    /// @inheritdoc ERC721
+    function _baseURI() internal view override returns (string memory) {
+        return baseURI;
+    }
+}
