@@ -2,5 +2,6 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+sender = "0x7bB341488d5E6838Bb9C1fD521543f83066Dc9Bd"
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
